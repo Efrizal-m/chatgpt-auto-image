@@ -160,6 +160,26 @@ Contoh body:
 }
 ```
 
+Jika n8n mengirim literal `{{$json.id}}` sebagai `jobId`, berarti field body belum berada di expression mode. Gunakan salah satu cara ini:
+
+Body sebagai expression penuh:
+
+```js
+={{
+  {
+    jobId: $json.id,
+    prompt: $json.prompt
+  }
+}}
+```
+
+Atau jika memakai Body Parameters, set value masing-masing field sebagai expression:
+
+```text
+jobId  ={{$json.id}}
+prompt ={{$json.prompt}}
+```
+
 Pastikan `jobId` unik. Jika `jobId` sudah ada, server mengembalikan HTTP `409`.
 
 ## Konfigurasi Env
@@ -239,10 +259,72 @@ Compose expose port `3000` dan mount:
 Catatan penting: browser berjalan `headless: false`, jadi container butuh akses display GUI. Di Linux X11, compose sudah mount `/tmp/.X11-unix` dan meneruskan `DISPLAY`. Anda mungkin perlu mengizinkan akses lokal:
 
 ```bash
-xhost +local:
+echo "$DISPLAY"
+xhost +SI:localuser:root
+docker compose down
+docker compose up --build
 ```
 
+Jika `echo "$DISPLAY"` kosong, jalankan command dari terminal di desktop session, bukan dari SSH/headless shell. Untuk beberapa distro lama, `xhost +local:docker` atau `xhost +local:` mungkin diperlukan.
+
 Untuk macOS/Windows, gunakan XQuartz/VcXsrv atau jalankan mode lokal Node.js agar browser visible lebih sederhana.
+
+### Troubleshooting: Missing X Server
+
+Error seperti ini berarti browser visible tidak bisa membuka jendela dari dalam container:
+
+```text
+Looks like you launched a headed browser without having a XServer running.
+Authorization required, but no authorization protocol specified
+Missing X server or $DISPLAY
+```
+
+Perbaikan cepat di Linux desktop:
+
+```bash
+cd /path/to/chatgpt-auto-image
+echo "$DISPLAY"
+xhost +SI:localuser:root
+docker compose down
+docker compose up --build
+```
+
+Setelah container jalan lagi, queue masih `paused` karena error sebelumnya. Cek status lalu resume:
+
+```bash
+curl http://localhost:3000/status
+curl -X POST http://localhost:3000/resume
+```
+
+Job yang sudah `stopped` tidak otomatis diulang. Kirim job baru dari n8n dengan `jobId` baru setelah browser sudah bisa tampil.
+
+### Troubleshooting: Permission denied di data/events.log
+
+Error seperti ini biasanya muncul setelah sebelumnya menjalankan Docker, lalu menjalankan lokal dengan `npm run dev`:
+
+```text
+Error: EACCES: permission denied, open './data/events.log'
+```
+
+Penyebabnya: folder `data/` atau `browser-profile/` dibuat/ditulis oleh container sebagai user `root`, sehingga user Linux biasa tidak bisa menulis.
+
+Perbaikan:
+
+```bash
+cd /path/to/chatgpt-auto-image
+sudo chown -R "$USER:$USER" data browser-profile
+chmod -R u+rwX data browser-profile
+npm run dev
+```
+
+Jika ingin cek ownership:
+
+```bash
+ls -ld data browser-profile
+ls -l data
+```
+
+Output idealnya menunjukkan user kamu sendiri, bukan `root root`.
 
 ## Cara Kerja Worker
 
