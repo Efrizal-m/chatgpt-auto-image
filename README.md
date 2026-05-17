@@ -50,7 +50,7 @@ Syarat:
 
 ```bash
 npm install
-npx playwright install chromium
+npm run install:browsers
 cp .env.example .env
 npm run dev
 ```
@@ -108,6 +108,16 @@ Melihat status queue dan worker.
 ```bash
 curl http://localhost:3000/status
 ```
+
+### GET /health
+
+Melihat health API dan preflight runtime untuk Playwright Chromium serta akses display Linux.
+
+```bash
+curl http://localhost:3000/health
+```
+
+Jika `preflight.ok` bernilai `false`, perbaiki dulu sebelum enqueue job.
 
 ### POST /pause
 
@@ -176,11 +186,36 @@ Body sebagai expression penuh:
 Atau jika memakai Body Parameters, set value masing-masing field sebagai expression:
 
 ```text
-jobId  ={{$json.id}}
-prompt ={{$json.prompt}}
+jobId  = {{ $json.id }}
+prompt = {{ $json.prompt }}
 ```
 
+Di n8n, jangan ketik expression sebagai teks biasa. Klik tombol **fx / Expression** pada value
+field, lalu masukkan expression di sana. Jika panel request masih menunjukkan
+`"jobId": "{{$json.id}}"`, berarti expression belum resolve.
+
 Pastikan `jobId` unik. Jika `jobId` sudah ada, server mengembalikan HTTP `409`.
+
+### Troubleshooting n8n: Workflow 404 / 6000ms timeout
+
+Error n8n seperti ini bukan berasal dari API project ini:
+
+```text
+404 Could not load the workflow - you can only access workflows owned by you
+AxiosError: timeout of 6000ms exceeded
+.../n8n/src/modules/community-packages/...
+```
+
+`404 Could not load the workflow` berarti user n8n yang sedang login bukan owner workflow itu,
+atau workflow dibuka dari URL/account yang salah. Buka workflow dari akun owner, pindahkan ownership,
+atau duplicate/import workflow ke akun yang dipakai.
+
+Stack `community-packages` biasanya n8n sedang timeout saat mengambil daftar community nodes. Itu
+terpisah dari `POST /enqueue`. Untuk memastikan API ini sehat, cek langsung:
+
+```bash
+curl http://localhost:3000/health
+```
 
 ## Konfigurasi Env
 

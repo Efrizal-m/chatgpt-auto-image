@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from 'express';
 import type { EventLogger } from './logger.js';
+import type { RuntimePreflightStatus } from './preflight.js';
 import type { QueueStore } from './store.js';
 import type { WorkerManager } from './worker.js';
 
@@ -7,9 +8,10 @@ interface ServerDeps {
   store: QueueStore;
   worker: WorkerManager;
   logger: EventLogger;
+  checkRuntimePreflight: () => Promise<RuntimePreflightStatus>;
 }
 
-export function createServer({ store, worker, logger }: ServerDeps) {
+export function createServer({ store, worker, logger, checkRuntimePreflight }: ServerDeps) {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
@@ -22,7 +24,26 @@ export function createServer({ store, worker, logger }: ServerDeps) {
       return;
     }
 
+    if (hasUnresolvedN8nExpression(jobId) || hasUnresolvedN8nExpression(prompt)) {
+      res.status(400).json({
+        error:
+          'n8n expression was sent literally. Put the HTTP Request body/value fields in expression mode so jobId and prompt resolve before calling this API.',
+        received: { jobId, prompt }
+      });
+      return;
+    }
+
     try {
+      const preflight = await checkRuntimePreflight();
+      if (!preflight.ok) {
+        await logger.log('api.enqueue_rejected_preflight', { jobId, preflight });
+        res.status(503).json({
+          error: 'Runtime preflight failed. Fix Playwright Chromium or display setup before enqueueing jobs.',
+          preflight
+        });
+        return;
+      }
+
       const job = await store.enqueue(jobId, prompt);
       await logger.log('api.enqueue', { jobId });
       if (store.getQueueStatus() === 'running') worker.start();
@@ -58,9 +79,14 @@ export function createServer({ store, worker, logger }: ServerDeps) {
     res.json({ ok: true, removed });
   });
 
-  app.get('/health', (_req: Request, res: Response) => {
-    res.json({ ok: true });
+  app.get('/health', async (_req: Request, res: Response) => {
+    const preflight = await checkRuntimePreflight();
+    res.json({ ok: true, preflight });
   });
 
   return app;
+}
+
+function hasUnresolvedN8nExpression(value: string): boolean {
+  return /{{\s*\$[^}]+}}/.test(value);
 }
